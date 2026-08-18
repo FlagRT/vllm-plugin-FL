@@ -44,6 +44,11 @@ class CommunicatorFL(DeviceCommunicatorBase):
             # group, where we always have either custom allreduce or pynccl.
             out = input_.clone()
             torch.distributed.all_reduce(out, group=self.device_group)
+            # [SYNC-FIX] flagcx 后端 all_reduce 异步返回，必须同步才能读到结果
+            try:
+                torch.npu.synchronize()
+            except Exception:
+                pass
         return out
 
     def reduce_scatter(self, input_: torch.Tensor, dim: int = -1):
@@ -142,6 +147,30 @@ class CommunicatorFL(DeviceCommunicatorBase):
         if self.all2all_manager is not None:
             self.all2all_manager.destroy()
             self.all2all_manager = None
+
+    def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        # [SYNC-FIX] 覆盖基类实现：基类用 dist.all_gather_into_tensor 异步返回，
+        # flagcx 后端下必须同步。逻辑与 DeviceCommunicatorBase.all_gather 一致。
+        if dim < 0:
+            dim += input_.dim()
+        input_size = input_.size()
+        output_size = (input_size[0] * self.world_size,) + input_size[1:]
+        output_tensor = torch.empty(output_size, dtype=input_.dtype,
+                                    device=input_.device)
+        torch.distributed.all_gather_into_tensor(output_tensor, input_,
+                                                 group=self.device_group)
+        try:
+            torch.npu.synchronize()
+        except Exception:
+            pass
+        output_tensor = output_tensor.reshape((self.world_size,) + input_size)
+        output_tensor = output_tensor.movedim(0, dim)
+        output_tensor = output_tensor.reshape(
+            input_size[:dim]
+            + (self.world_size * input_size[dim],)
+            + input_size[dim + 1:]
+        )
+        return output_tensor
 
     def all_gatherv(self,
                     input_: Union[torch.Tensor, list[torch.Tensor]],

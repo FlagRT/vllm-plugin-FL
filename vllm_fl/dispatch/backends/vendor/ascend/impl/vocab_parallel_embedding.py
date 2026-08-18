@@ -135,7 +135,8 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
             input_ < org_vocab_end_index)
         # Adapt: avoid create added_vocab_mask when added_vocab_start_index == added_vocab_end_index.
         if added_vocab_start_index == added_vocab_end_index:
-            valid_offset = (org_vocab_start_index * org_vocab_mask)
+            valid_offset = (org_vocab_start_index * org_vocab_mask.to(
+                torch.int64))
             vocab_mask = org_vocab_mask
         else:
             added_vocab_mask = (input_ >= added_vocab_start_index) & (
@@ -144,10 +145,13 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                 org_vocab_end_index -
                 org_vocab_start_index) - num_org_vocab_padding
             valid_offset = (org_vocab_start_index *
-                            org_vocab_mask) + (added_offset * added_vocab_mask)
+                            org_vocab_mask.to(torch.int64)) + (
+                                added_offset * added_vocab_mask.to(torch.int64))
             vocab_mask = org_vocab_mask | added_vocab_mask
         # Adapt end.
-        input_ = vocab_mask * (input_ - valid_offset)
+        # NOTE(flagos): 必须显式转 int64——flagos(PrivateUse1) 上 bool*int
+        # 类型提升错误（返回 bool），会导致 mask 乘法后 token id 全变 1
+        input_ = vocab_mask.to(torch.int64) * (input_ - valid_offset)
         return input_, ~vocab_mask
 
     def forward(self, input_):
