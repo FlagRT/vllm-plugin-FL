@@ -846,7 +846,7 @@ class WorkerFL(WorkerBase):
             output = self.model_runner.execute_model(
                 scheduler_output, intermediate_tensors
             )
-            if isinstance(output, (ModelRunnerOutput, NoneType)):
+            if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput, NoneType)):
                 return output
 
         assert isinstance(output, IntermediateTensors)
